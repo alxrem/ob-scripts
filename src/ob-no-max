@@ -1,0 +1,30 @@
+#!/usr/bin/env ruby
+# vim: ts=2 sts=2 sw=2 et
+
+require 'rexml/document'
+require 'rexml/xpath'
+include REXML
+
+wm_class_string = %x{xprop WM_CLASS}
+unless wm_class_string =~ /^WM_CLASS\(STRING\) = ".*?", "(.*?)"$/
+  %x{zenity --error --text 'Unrecognized xprop answer: #{wm_class_string.gsub("'", '´')}'}
+  exit 1
+end
+
+wm_class = $1
+exit unless %x{zenity --question --text "Don't maximize windows with class \\"#{wm_class}\\"?"}
+
+config_file = File.join ENV['HOME'], '.config/openbox/rc.xml'
+config = Document.new(File.open(config_file)) { |f| f.read }
+
+applications = XPath.first config, '/openbox_config/applications'
+if XPath.first applications, "application[@class='#{wm_class}']"
+  %x{zenity --error --text 'Window class "#{wm_class.gsub("'", '´')}" is already described'}
+  exit 1
+end
+
+applications.add_element('application', 'class' => wm_class).add_element('maximized').add_text('false')
+puts config.to_s
+File.open(config_file, 'w') { |f| f.write config.to_s }
+
+%x{openbox --reconfigure}

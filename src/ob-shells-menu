@@ -1,0 +1,14 @@
+#!/bin/sh
+
+echo '<openbox_pipe_menu>'
+for HOST in `cat $HOME/.ssh/config | awk '/^\s*Host / { print $2 }'`
+do
+    cat <<EOF
+<item label="$HOST">
+    <action name="Execute">
+        <command>x-terminal-emulator -e ssh $HOST</command>
+    </action>
+</item>
+EOF
+done
+echo '</openbox_pipe_menu>'

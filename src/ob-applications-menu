@@ -1,0 +1,173 @@
+#!/usr/bin/python
+
+from __future__ import with_statement
+import os
+import os.path
+import sys
+import re
+
+
+APPLICATIONS = (
+    "/usr/share/applnk",
+    "/usr/share/applications",
+    "/usr/share/applications/kde",
+    "/usr/share/applications/kde4",
+    "/home/rem/Desktop",
+)
+
+
+EXEC_FIELD_CODES_RE = re.compile("%[fFuUickvm]")
+def remove_exec_field_codes(line):
+    return EXEC_FIELD_CODES_RE.sub("", line)
+
+
+def escape(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+class Item:
+    def __init__(self, label, exec_, categories, terminal):
+        self.label = label
+        self.exec_ = remove_exec_field_codes(exec_)
+        self.terminal = terminal
+        self.categories = categories.strip(";").split(";")
+
+    def command(self):
+        if self.terminal:
+            return 'x-terminal-emulator -e "%s"' % self.exec_
+        else:
+            return self.exec_
+        
+    def draw(self):
+        print('''<item label="%s">
+<action name="Execute">
+<command>%s</command>
+</action>
+</item>''' % (escape(self.label), escape(self.command())))
+
+
+class Menu:
+    def __init__(self, category, label = None):
+        self.category = category
+        self.label = label or category
+        self.items = []
+
+    def draw(self):
+        if self.items:
+            self.items.sort(lambda a,b: cmp(a.label.lower(), b.label.lower()))
+            print('<menu id="applications-%s" label="%s">'
+                  % (escape(self.category), escape(self.label)))
+            for item in self.items:
+                item.draw()
+            print('</menu>')
+        
+    def append(self, item):
+        self.items.append(item)
+
+
+class TopMenu:
+    def __init__(self, menus):
+        self.menus = {}
+        self.ordered_menus = menus
+        for menu in menus:
+            self.menus[menu.category] = menu
+        self.default_menu = Menu("Other")
+
+    def draw(self):
+        print("<openbox_pipe_menu>")
+        for menu in self.ordered_menus:
+            menu.draw()
+        self.default_menu.draw()
+        print("</openbox_pipe_menu>")
+
+    def place(self, item):
+        for top_category in self.menus:
+            if top_category in item.categories:
+                self.menus[top_category].append(item)
+                return
+        self.default_menu.append(item)
+
+
+class Directory:
+    class Entry:
+        def __init__(self, filename):
+            self.filename = filename
+            self.name = None
+            self.exec_ = None
+            self.categories = ""
+            self.terminal = False
+            self.only_show_in_de = False
+
+        def parse(self):
+            with open(self.filename) as entry_file:
+                # skip lines until [Desktop Entry] section
+                for line in entry_file:
+                    if line.startswith("[Desktop Entry]"):
+                        break
+                for line in entry_file:
+                    # stop parsing if next section started
+                    if line.startswith("["):
+                        break
+                    # skip line if not key=value pair
+                    try:
+                        key, value = line.split("=", 1)
+                    except ValueError:
+                        continue
+
+                    if key == "Name":
+                        self.name = value.rstrip()
+                    elif key == "Exec":
+                        self.exec_ = value.rstrip()
+                    elif key == "Categories":
+                        self.categories = value.rstrip()
+                    elif key == "Terminal":
+                        self.terminal = value.rstrip() in ("True", "true")
+                    elif key == "OnlyShowIn":
+                        self.only_show_in_de = True
+            
+        def is_visible(self):
+            return self.name and self.exec_ \
+                and not (self.only_show_in_de
+                         or "X-KDE-settings" in self.categories)
+
+        def new_item(self):
+            return Item(self.name, self.exec_, self.categories, self.terminal)
+
+    def __init__(self, path):
+        self.path = path
+
+    def entry_path(self, filename):
+        return os.path.join(self.path, filename)
+    
+    def __iter__(self):
+        try:
+            filenames = os.listdir(self.path)
+        except OSError:
+            sys.stderr.write("ob-application-menu: can't list directory %s\n"
+                             % (self.path,))
+        else:
+            for filename in filenames:
+                if filename.endswith(".desktop"):
+                    entry = Directory.Entry(self.entry_path(filename))
+                    entry.parse()
+                    if entry.is_visible():
+                        yield entry.new_item()
+            
+
+applications_menu = TopMenu([
+    Menu("Development"),
+    Menu("Game", "Games"),
+    Menu("System"),
+    Menu("Network"),
+    Menu("Utility", "Utilities"),
+    Menu("AudioVideo", "Audio and video"),
+    Menu("Graphics"),
+    Menu("Office"),
+    Menu("Settings"),
+])
+
+if __name__ == "__main__":
+    for path in APPLICATIONS:
+        for item in Directory(path):
+            applications_menu.place(item)
+    applications_menu.draw()
