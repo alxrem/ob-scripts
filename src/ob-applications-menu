@@ -12,7 +12,7 @@ APPLICATIONS = (
     "/usr/share/applications",
     "/usr/share/applications/kde",
     "/usr/share/applications/kde4",
-    "/home/rem/Desktop",
+    os.path.join(os.environ['HOME'], 'Desktop'),
 )
 
 
